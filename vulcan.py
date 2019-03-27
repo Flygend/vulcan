@@ -423,8 +423,5 @@ class Spider(object):
 if __name__ == '__main__':
     spider = Spider(concurrent_num=20, depth=5, max_url_num=300, crawler_mode=1, dynamic_parse=False)
     url = "http://www.baidu.com"
-    '''
-    pull test
-    '''
     spider.feed_url(url)
     spider.start()
