@@ -94,9 +94,11 @@ def to_unicode(data, charset=None):
     return unicode_data
 
 
+#   Greenlet的子类
 class Fetcher(Greenlet):
     """抓取器(下载器)类"""
 
+    #   重写__init__函数
     def __init__(self, spider):
         Greenlet.__init__(self)
         self.fetcher_id = str(uuid.uuid1())[:8]
@@ -108,17 +110,25 @@ class Fetcher(Greenlet):
         self.crawler_queue = self.spider.crawler_queue
         self.logger = self.spider.logger
 
-    def _fetcher(self):
+    def _fetcher(self): #   私有方法
         '''
         抓取器主函数
         '''
         self.logger.info("fetcher %s starting...." % (self.fetcher_id,))
+
+        #   如果 stopped 事件没有被置位
         while not self.spider.stopped.isSet():
             try:
-                url_data = self.fetcher_queue.get(block=False)
+                url_data = self.fetcher_queue.get(block=False)  #   从队列取出一个URL
+                #    self.logger.info("url_data %s" % url_data)
+                #    (block is false), return an item if one is immediately available
+                #    if block is true and timeout is None (the default), block if necessary until an item is available
+                #    If timeout is a positive number, it blocks at most timeout
             except queue.Empty, e:
+                #   如果停止爬取并且全部下载完毕
                 if self.spider.crawler_stopped.isSet() and self.fetcher_queue.unfinished_tasks == 0:
                     self.spider.stop()
+                #   如果全部处理完毕
                 elif self.crawler_queue.unfinished_tasks == 0 and self.fetcher_queue.unfinished_tasks == 0:
                     self.spider.stop()
                 else:
@@ -178,6 +188,7 @@ class Fetcher(Greenlet):
                 else:
                     return u''
 
+    #   重写_run函数，也是执行入口
     def _run(self):
         self._fetcher()
 
@@ -204,27 +215,33 @@ class Spider(object):
         dynamic_parse     : 是否使用WebKit动态解析
         """
 
-        self.logger.setLevel(logging.DEBUG)
+        #   日志模块
+        self.logger.setLevel(logging.DEBUG) #   日志级别
+        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")   #   日志格式
         hd = logging.StreamHandler()
-        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         hd.setFormatter(formatter)
         self.logger.addHandler(hd)
 
         self.stopped = event.Event()
-        self.internal_timeout = internal_timeout
+        self.internal_timeout = internal_timeout    #   内部调用超时时间
         self.internal_timer = Timeout(internal_timeout)
 
-        self.crawler_mode = crawler_mode  # 爬取器模型
-        self.concurrent_num = concurrent_num
+        self.crawler_mode = crawler_mode        #   爬取器模型
+        self.concurrent_num = concurrent_num    #   并行crawler与fetcher数量
+
+        #   fetcher使用gevent模型
         self.fetcher_pool = pool.Pool(self.concurrent_num)
 
-        # 多线程模型
+        #   crawler模型设置
+        #   crawler负责解析并爬取HTML中的URL，送入fetcher，fetcher负责获取HTML，送入crawler
         if self.crawler_mode == 0:
+            #   线程池模型
             self.crawler_pool = threadpool.ThreadPool(min(50, self.concurrent_num))
         else:
-            # gevent模型
+            #   gevent模型
             self.crawler_pool = pool.Pool(self.concurrent_num)
 
+        #   fetcher和crawler两部分独立工作，互不干扰，通过queue进行链接
         # self.fetcher_queue = queue.JoinableQueue(maxsize=self.concurrent_num*100)
         self.fetcher_queue = threadpool.Queue(maxsize=self.concurrent_num * 10000)
         self.crawler_queue = threadpool.Queue(maxsize=self.concurrent_num * 10000)
@@ -232,27 +249,32 @@ class Spider(object):
         self.fetcher_cache = UrlCache()
         self.crawler_cache = UrlCache()
 
-        self.default_crawl_tags = ['a', 'base', 'iframe', 'frame', 'object']
-        self.ignore_ext = ['js', 'css', 'png', 'jpg', 'gif', 'bmp', 'svg', 'exif', 'jpeg', 'exe', 'rar', 'zip']
-        self.crawl_tags = list(set(self.default_crawl_tags) | set(crawl_tags))
-        self.same_origin = same_origin
-        self.depth = depth
-        self.max_url_num = max_url_num
-        self.dynamic_parse = dynamic_parse
+        self.default_crawl_tags = ['a', 'base', 'iframe', 'frame', 'object']    #   默认的爬行时收集URL所属标签列表
+        self.ignore_ext = ['js', 'css', 'png', 'jpg', 'gif', 'bmp', 'svg', 'exif', 'jpeg', 'exe', 'rar', 'zip']     #   爬行时忽略的URL种类
+        self.crawl_tags = list(set(self.default_crawl_tags) | set(crawl_tags))  #   爬行时收集URL所属标签列表
+        self.same_origin = same_origin      #   是否同源
+        self.depth = depth                  #   爬行深度限制
+        self.max_url_num = max_url_num      #   最大收集URL数量
+        self.dynamic_parse = dynamic_parse  #   是否使用WebKit动态解析
+
+        #   如果开启动态解析
         if self.dynamic_parse:
             self.webkit = WebKit()
         self.crawler_stopped = event.Event()
 
         self.plugin_handler = plugin  # 注册Crawler中使用的插件
+        #   自定义HTTP头
         self.custom_headers = custom_headers
+
 
     def _start_fetcher(self):
         '''
         启动下载器
         '''
-        for i in xrange(self.concurrent_num):
-            fetcher = Fetcher(self)
-            self.fetcher_pool.start(fetcher)
+        for i in xrange(self.concurrent_num):   #   concurrent_num:并行数量
+            fetcher = Fetcher(self)             #   实例化一个 fetcher
+            self.fetcher_pool.start(fetcher)    #   调用start()开始执行_run()
+
 
     def _start_crawler(self):
         '''
@@ -260,6 +282,7 @@ class Spider(object):
         '''
         for _ in xrange(self.concurrent_num):
             self.crawler_pool.spawn(self.crawler)
+
 
     def start(self):
         '''
@@ -272,7 +295,8 @@ class Spider(object):
         elif self.crawler_mode == 1:
             self.logger.info("crawler run in gevent mode.")
 
-        self._start_fetcher()
+        #   开启fetcher与crawler
+        self._start_fetcher()   #   初始爬取URL已在main函数中spider.feed_url(url)中设置
         self._start_crawler()
 
         self.stopped.wait()  # 等待停止事件置位
@@ -349,6 +373,7 @@ class Spider(object):
 
                 self.crawler_queue.task_done()
 
+
     def check_url_usable(self, link):
         '''
         检查URL是否符合可用规则
@@ -369,25 +394,35 @@ class Spider(object):
 
         return True
 
+
     def feed_url(self, url):
         '''
         设置初始爬取URL
         '''
-        if isinstance(url, basestring):
-            url = to_unicode(url)
-            url = UrlData(url)
 
+        #   先判断是否为字符串
+        #   basestring是str和unicode的基类，也是抽象类，因此不能被调用和实例化，但可以用来判断一个对象是否为str或者unicode的实例
+        #   isinstance(obj ,basestring) 等价于 isinstance(obj, (str,  unicode))
+        if isinstance(url, basestring): #   判断一个对象是否是一个已知的类型
+            url = to_unicode(url)   #   将输入的字符串转化为unicode对象
+            url = UrlData(url)  #   URL对象类
+
+        #   同源策略
+        #   如果两个URL的协议，域名和端口相同，则表示他们是同源的
         if self.same_origin:
-            url_part = urlparse.urlparse(unicode(url))
-            self.origin = (url_part.scheme, url_part.netloc)
+            url_part = urlparse.urlparse(unicode(url))  #   获取urlparse对象
+            self.origin = (url_part.scheme, url_part.netloc)    #   scheme为协议，netloc为域名
 
+        #   初始URL加入到HTML下载队列，此时url为UrlData类的对象
         self.fetcher_queue.put(url, block=True)
+
 
     def stop(self):
         '''
         终止爬虫
         '''
-        self.stopped.set()
+        self.stopped.set()  #   stopped事件置位
+
 
     def _maintain_spider(self):
         '''
@@ -410,18 +445,19 @@ class Spider(object):
             fetcher = Fetcher(self)
             self.fetcher_pool.start(fetcher)
 
+
     def _check_same_origin(self, current_url):
         '''
         检查两个URL是否同源
         '''
         current_url = to_unicode(current_url)
-        url_part = urlparse.urlparse(current_url)
-        url_origin = (url_part.scheme, url_part.netloc)
+        url_part = urlparse.urlparse(current_url)   #   获取urlparse对象
+        url_origin = (url_part.scheme, url_part.netloc) #   检查协议与域名
         return url_origin == self.origin
 
 
 if __name__ == '__main__':
     spider = Spider(concurrent_num=20, depth=5, max_url_num=300, crawler_mode=1, dynamic_parse=False)
     url = "http://www.baidu.com"
-    spider.feed_url(url)
+    spider.feed_url(url)    #   设置初始爬取URL
     spider.start()
