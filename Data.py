@@ -12,10 +12,12 @@ class UrlData(object):
         self.params = {}
         self.fragments = {}
         self.post_data = {}
-        
+
+    #   面向用户，print类的对象时调用
     def __str__(self):
         return self.url
-    
+
+    #   面向开发者
     def __repr__(self):
         return '<Url data: %s>' % (self.url,)
     
