@@ -119,7 +119,7 @@ class Fetcher(Greenlet):
         #   如果 stopped 事件没有被置位
         while not self.spider.stopped.isSet():
             try:
-                url_data = self.fetcher_queue.get(block=False)  #   从队列取出一个URL
+                url_data = self.fetcher_queue.get(block=False)  #   从下载队列取出一个URL
                 #    self.logger.info("url_data %s" % url_data)
                 #    (block is false), return an item if one is immediately available
                 #    if block is true and timeout is None (the default), block if necessary until an item is available
@@ -134,24 +134,28 @@ class Fetcher(Greenlet):
                 else:
                     gevent.sleep()
             else:
+                #   如果html数据为空
                 if not url_data.html:
                     try:
+                        #   避免重复爬取
                         if url_data not in set(self.crawler_cache):
                             html = ''
                             with gevent.Timeout(self.spider.internal_timeout, False) as timeout:
-                                html = self._open(url_data)
-                            if not html.strip():
+                                html = self._open(url_data) #   获取HTML内容
+                            if not html.strip():    #   如果返回数据为空
                                 self.spider.fetcher_queue.task_done()
                                 continue
                             self.logger.info("fetcher %s accept %s" % (self.fetcher_id, url_data))
+
+                            #   将HTML加入解析爬取队列
                             url_data.html = html
                             if not self.spider.crawler_stopped.isSet():
                                 self.crawler_queue.put(url_data, block=True)
-                            self.crawler_cache.insert(url_data)
+                            self.crawler_cache.insert(url_data) #   加入到处理完毕队列
                     except Exception, e:
                         import traceback
                         traceback.print_exc()
-                self.spider.fetcher_queue.task_done()
+                self.spider.fetcher_queue.task_done()   #   下载队列取出的URL处理完毕
 
     def _open(self, url_data):
         '''
@@ -281,7 +285,7 @@ class Spider(object):
         启动爬取器
         '''
         for _ in xrange(self.concurrent_num):
-            self.crawler_pool.spawn(self.crawler)
+            self.crawler_pool.spawn(self.crawler)   #   启动self.crawler()函数
 
 
     def start(self):
@@ -301,6 +305,7 @@ class Spider(object):
 
         self.stopped.wait()  # 等待停止事件置位
 
+        #   等待fetcher与crawler执行结束
         try:
             self.internal_timer.start()
             self.fetcher_pool.join(timeout=self.internal_timer)
@@ -326,22 +331,26 @@ class Spider(object):
         while not self.stopped.isSet() and not self.crawler_stopped.isSet():
             try:
                 self._maintain_spider()  # 维护爬虫池
-                url_data = self.crawler_queue.get(block=False)
-            except queue.Empty, e:
-                if self.crawler_queue.unfinished_tasks == 0 and self.fetcher_queue.unfinished_tasks == 0:
+                url_data = self.crawler_queue.get(block=False)  #   从爬取队列取出一个URL
+            except queue.Empty, e:  #   队列为空
+                if self.crawler_queue.unfinished_tasks == 0 and self.fetcher_queue.unfinished_tasks == 0:   #   全部处理完毕
                     self.stop()
-                else:
+                else:   #   fetcher没有处理完毕
                     if self.crawler_mode == 1:
                         gevent.sleep()
             else:
                 pre_depth = url_data.depth
-                curr_depth = pre_depth + 1
+                curr_depth = pre_depth + 1  #   当前深度
+
+                #   生成URL list
                 link_generator = HtmlAnalyzer.extract_links(url_data.html, url_data.url, self.crawl_tags)
                 link_list = [url for url in link_generator]
-                if self.dynamic_parse:
+                if self.dynamic_parse:  #   WebKit动态解析
                     link_generator = self.webkit.extract_links(url_data.url)
                     link_list.extend([url for url in link_generator])
-                link_list = list(set(link_list))
+                link_list = list(set(link_list))    #   去重
+
+                #   遍历解析出的URL list
                 for index, link in enumerate(link_list):
                     if not self.check_url_usable(link):
                         continue
@@ -360,9 +369,11 @@ class Spider(object):
                             break
                     link = to_unicode(link)
                     url = UrlData(link, depth=curr_depth)
-                    self.fetcher_cache.insert(url)
+                    #   此处调整顺序，应该先加入下载队列
                     self.fetcher_queue.put(url, block=True)
+                    self.fetcher_cache.insert(url)  #   加入到已经处理fetcher队列
 
+                #   插件部分，暂时不关注
                 for plugin_name in self.plugin_handler:  # 循环动态调用初始化时注册的插件
                     try:
                         plugin_obj = eval(plugin_name)()
@@ -431,6 +442,8 @@ class Spider(object):
         2)根据剩余任务数量及池的大小补充crawler和fetcher
         维持爬虫池饱满
         '''
+
+        #   gevent模型
         if self.crawler_mode == 1:
             for greenlet in list(self.crawler_pool):
                 if greenlet.dead:

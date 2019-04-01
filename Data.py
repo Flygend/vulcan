@@ -28,7 +28,7 @@ class UrlData(object):
 class UrlCache(object):
     '''URL缓存类'''
     def __init__(self):
-        self.__url_cache = {}
+        self.__url_cache = {}   #   dict
         
     def __len__(self):
         return len(self.__url_cache)
